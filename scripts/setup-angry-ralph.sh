@@ -146,7 +146,9 @@ trap '_cleanup_on_failure' EXIT
 BASELINE_REF=""
 if [[ "$SCOPE" == "cumulative" ]]; then
   if git rev-parse --is-inside-work-tree &>/dev/null; then
-    TIMESTAMP="$(date +%s%N 2>/dev/null || date +%s 2>/dev/null || echo "0")-$$-${RANDOM}"
+    _TS=$(date +%s%N 2>/dev/null)
+    [[ "$_TS" =~ ^[0-9]+$ ]] || _TS=$(date +%s 2>/dev/null || echo "0")
+    TIMESTAMP="${_TS}-$$-${RANDOM}"
     BASELINE_REF="angry-ralph-baseline-${TIMESTAMP}"
     git tag "$BASELINE_REF" HEAD
     _CREATED_TAG="$BASELINE_REF"
