@@ -70,6 +70,7 @@ format_duration() {
   end_epoch=$(date +%s)
   local elapsed=$((end_epoch - start_epoch))
   if [[ $elapsed -lt 0 ]]; then
+    echo "⚠️  Clock skew detected" >&2
     echo ""
     return
   fi
@@ -281,7 +282,7 @@ ${WORK_AGENT_PROMPT}
 After the agent completes, summarize what was fixed and any remaining work."
 fi
 
-# Update iteration
+# Update iteration (.claude/ dir guaranteed to exist — setup script creates it before state file)
 TEMP_FILE=$(mktemp "${RALPH_STATE_FILE}.XXXXXX")
 trap 'rm -f "$TEMP_FILE"' EXIT INT TERM
 sed "s/^iteration: .*/iteration: $NEXT_ITERATION/" "$RALPH_STATE_FILE" > "$TEMP_FILE"
