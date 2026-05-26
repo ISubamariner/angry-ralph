@@ -10,7 +10,7 @@ if [[ ! -f "$RALPH_STATE_FILE" ]]; then
 fi
 
 # Strip \r and parse frontmatter (|| true on grep to prevent pipefail crash on missing keys)
-FRONTMATTER=$(sed 's/\r$//' "$RALPH_STATE_FILE" | sed -n '/^---$/,/^---$/{ /^---$/d; p; }')
+FRONTMATTER=$(tr -d '\r' "$RALPH_STATE_FILE" | sed -n '/^---$/,/^---$/{ /^---$/d; p; }')
 ITERATION=$(echo "$FRONTMATTER" | grep '^iteration:' | sed 's/iteration: *//' || true)
 MAX_ITERATIONS=$(echo "$FRONTMATTER" | grep '^max_iterations:' | sed 's/max_iterations: *//' || true)
 STOP_WHEN=$(echo "$FRONTMATTER" | grep '^stop_when:' | sed 's/stop_when: *//' || true)
@@ -31,7 +31,7 @@ fi
 
 cleanup() {
   if [[ -n "${BASELINE_REF:-}" ]] && git rev-parse --is-inside-work-tree &>/dev/null; then
-    git tag -d "$BASELINE_REF" &>/dev/null || true
+    git rev-parse --verify "refs/tags/$BASELINE_REF" &>/dev/null && git tag -d "$BASELINE_REF" &>/dev/null || true
   fi
   rm -f "$RALPH_STATE_FILE"
 }
@@ -144,6 +144,11 @@ if [[ $JQ_EXIT -ne 0 ]]; then
   exit 0
 fi
 
+if [[ -z "$LAST_OUTPUT" ]]; then
+  echo "⚠️  Angry Ralph: Empty transcript output, will retry next hook" >&2
+  exit 0
+fi
+
 # Check for review-result tags
 HAS_CLEAN=$(echo "$LAST_OUTPUT" | grep -c '<review-result>CLEAN</review-result>' || true)
 HAS_SPOTLESS=$(echo "$LAST_OUTPUT" | grep -c '<review-result>SPOTLESS</review-result>' || true)
@@ -250,7 +255,7 @@ ${REVIEW_AGENT_PROMPT}
 After the agent returns its report, relay the findings to the conversation. Then, if the agent found ${REVIEW_THRESHOLD}, output <review-result>${RESULT_TAG}</review-result>. ONLY output that tag if the agent's review genuinely supports it."
 else
   # Last was review pass (even) → next is work/fix pass
-  ORIGINAL_PROMPT=$(sed 's/\r$//' "$RALPH_STATE_FILE" | awk '/^---$/{i++; next} i>=2')
+  ORIGINAL_PROMPT=$(tr -d '\r' "$RALPH_STATE_FILE" | awk '/^---$/{i++; next} i>=2')
 
   WORK_AGENT_PROMPT="Fix ALL CRITICAL and IMPORTANT issues from the review above. Then continue working on the original task:
 
@@ -273,7 +278,7 @@ After the agent completes, summarize what was fixed and any remaining work."
 fi
 
 # Update iteration
-TEMP_FILE="${RALPH_STATE_FILE}.tmp.$$"
+TEMP_FILE=$(mktemp "${RALPH_STATE_FILE}.XXXXXX")
 trap 'rm -f "$TEMP_FILE"' EXIT INT TERM
 sed "s/^iteration: .*/iteration: $NEXT_ITERATION/" "$RALPH_STATE_FILE" > "$TEMP_FILE"
 mv "$TEMP_FILE" "$RALPH_STATE_FILE" || exit 1
@@ -285,9 +290,9 @@ SYSTEM_MSG="🔥 Angry Ralph iteration $NEXT_ITERATION ($(if (( NEXT_ITERATION %
 FILE_COUNT=""
 if git rev-parse --is-inside-work-tree &>/dev/null; then
   if [[ "$SCOPE" == "cumulative" ]] && [[ -n "$BASELINE_REF" ]]; then
-    FILE_COUNT=$(git diff --stat "$BASELINE_REF" 2>/dev/null | tail -1 | grep -oE '[0-9]+ file' | grep -oE '[0-9]+' || echo "")
+    FILE_COUNT=$(git diff --stat "$BASELINE_REF" 2>/dev/null | tail -1 | grep -oE '[0-9]+ files?' | grep -oE '[0-9]+' || echo "")
   else
-    FILE_COUNT=$(git diff --stat HEAD~1 2>/dev/null | tail -1 | grep -oE '[0-9]+ file' | grep -oE '[0-9]+' || echo "")
+    FILE_COUNT=$(git diff --stat HEAD~1 2>/dev/null | tail -1 | grep -oE '[0-9]+ files?' | grep -oE '[0-9]+' || echo "")
   fi
 fi
 

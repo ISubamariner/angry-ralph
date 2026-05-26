@@ -55,6 +55,7 @@ HELP_EOF
       exit 0
       ;;
     --max-iterations)
+      # 0 = unlimited (set when --max-iterations is omitted); explicit 0 is rejected
       if [[ -z "${2:-}" ]] || ! [[ "$2" =~ ^[1-9][0-9]*$ ]]; then
         echo "❌ Error: --max-iterations requires a positive integer" >&2
         exit 1
@@ -124,13 +125,13 @@ if [[ -z "$PROMPT" ]]; then
   exit 1
 fi
 
-if echo "$PROMPT" | grep -qx '\-\-\-'; then
+if echo "$PROMPT" | grep -qE '^\-\-\-[[:space:]]*$'; then
   echo "❌ Error: Prompt cannot contain a line that is exactly '---' (conflicts with state file format)" >&2
   exit 1
 fi
 
 if [[ -z "${CLAUDE_CODE_SESSION_ID:-}" ]]; then
-  echo "⚠️  Warning: CLAUDE_CODE_SESSION_ID not set — session isolation disabled" >&2
+  echo "⚠️  Warning: CLAUDE_CODE_SESSION_ID not set — concurrent sessions may interfere" >&2
 fi
 
 # Track tag for cleanup on failure
@@ -145,7 +146,7 @@ trap '_cleanup_on_failure' EXIT
 BASELINE_REF=""
 if [[ "$SCOPE" == "cumulative" ]]; then
   if git rev-parse --is-inside-work-tree &>/dev/null; then
-    TIMESTAMP="$(date +%s 2>/dev/null || echo "0")-${RANDOM}"
+    TIMESTAMP="$(date +%s 2>/dev/null || echo "0")-$$-${RANDOM}"
     BASELINE_REF="angry-ralph-baseline-${TIMESTAMP}"
     git tag "$BASELINE_REF" HEAD
     _CREATED_TAG="$BASELINE_REF"
@@ -172,6 +173,12 @@ mkdir -p .claude
   printf '\n'
   printf '%s\n' "$PROMPT"
 } > .claude/angry-ralph.local.md
+
+if [[ ! -f .claude/angry-ralph.local.md ]]; then
+  echo "❌ Error: Failed to create state file" >&2
+  _cleanup_on_failure
+  exit 1
+fi
 
 cat <<EOF
 🔥 Angry Ralph activated!

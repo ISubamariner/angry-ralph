@@ -7,6 +7,8 @@ hide-from-slash-command-tool: "true"
 
 # Angry Ralph Help
 
+<!-- Keep in sync with scripts/setup-angry-ralph.sh --help -->
+
 Print the following help text to the user (do not modify it):
 
 ```
