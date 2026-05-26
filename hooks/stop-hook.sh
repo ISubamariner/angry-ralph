@@ -10,7 +10,7 @@ if [[ ! -f "$RALPH_STATE_FILE" ]]; then
 fi
 
 # Strip \r and parse frontmatter (|| true on grep to prevent pipefail crash on missing keys)
-FRONTMATTER=$(tr -d '\r' "$RALPH_STATE_FILE" | sed -n '/^---$/,/^---$/{ /^---$/d; p; }')
+FRONTMATTER=$(tr -d '\r' < "$RALPH_STATE_FILE" | sed -n '/^---$/,/^---$/{ /^---$/d; p; }')
 ITERATION=$(echo "$FRONTMATTER" | grep '^iteration:' | sed 's/iteration: *//' || true)
 MAX_ITERATIONS=$(echo "$FRONTMATTER" | grep '^max_iterations:' | sed 's/max_iterations: *//' || true)
 STOP_WHEN=$(echo "$FRONTMATTER" | grep '^stop_when:' | sed 's/stop_when: *//' || true)
@@ -255,7 +255,7 @@ ${REVIEW_AGENT_PROMPT}
 After the agent returns its report, relay the findings to the conversation. Then, if the agent found ${REVIEW_THRESHOLD}, output <review-result>${RESULT_TAG}</review-result>. ONLY output that tag if the agent's review genuinely supports it."
 else
   # Last was review pass (even) → next is work/fix pass
-  ORIGINAL_PROMPT=$(tr -d '\r' "$RALPH_STATE_FILE" | awk '/^---$/{i++; next} i>=2')
+  ORIGINAL_PROMPT=$(tr -d '\r' < "$RALPH_STATE_FILE" | awk '/^---$/{i++; next} i>=2')
 
   WORK_AGENT_PROMPT="Fix ALL CRITICAL and IMPORTANT issues from the review above. Then continue working on the original task:
 
