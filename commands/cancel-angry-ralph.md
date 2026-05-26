@@ -14,5 +14,5 @@ hide-from-slash-command-tool: "true"
 3. **If EXISTS**:
    - Read `.claude/angry-ralph.local.md` to get iteration and baseline_ref from frontmatter
    - Remove the state file: `rm .claude/angry-ralph.local.md`
-   - If baseline_ref is not empty and matches the pattern `angry-ralph-baseline-[0-9]+-[0-9]+`, delete the git tag: `git tag -d -- "<baseline_ref>"` (ignore errors if not a git repo). Do NOT run git tag -d if the value doesn't match that pattern.
+   - If baseline_ref is not empty and matches the pattern `angry-ralph-baseline-[0-9]+-[0-9]+-[0-9]+`, delete the git tag: `git tag -d -- "<baseline_ref>"` (ignore errors if not a git repo). Do NOT run git tag -d if the value doesn't match that pattern.
    - Report: "Cancelled Angry Ralph loop (was at iteration N)"

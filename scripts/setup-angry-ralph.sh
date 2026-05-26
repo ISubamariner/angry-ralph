@@ -174,7 +174,7 @@ mkdir -p .claude
   printf '%s\n' "$PROMPT"
 } > .claude/angry-ralph.local.md
 
-if [[ ! -f .claude/angry-ralph.local.md ]]; then
+if [[ ! -s .claude/angry-ralph.local.md ]]; then
   echo "❌ Error: Failed to create state file" >&2
   _cleanup_on_failure
   exit 1

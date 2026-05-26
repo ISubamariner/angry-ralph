@@ -199,7 +199,7 @@ NEXT_ITERATION=$((ITERATION + 1))
 # Build diff instruction
 DIFF_CMD=""
 if [[ "$SCOPE" == "cumulative" ]] && [[ -n "$BASELINE_REF" ]]; then
-  if [[ "$BASELINE_REF" =~ ^angry-ralph-baseline-[0-9]+-[0-9]+$ ]]; then
+  if [[ "$BASELINE_REF" =~ ^angry-ralph-baseline-[0-9]+-[0-9]+-[0-9]+$ ]]; then
     DIFF_CMD="Run: git diff \"$BASELINE_REF\""
   else
     DIFF_CMD="Review the files you modified in your last pass"
