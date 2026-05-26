@@ -129,12 +129,26 @@ if echo "$PROMPT" | grep -qx '\-\-\-'; then
   exit 1
 fi
 
+if [[ -z "${CLAUDE_CODE_SESSION_ID:-}" ]]; then
+  echo "⚠️  Warning: CLAUDE_CODE_SESSION_ID not set — session isolation disabled" >&2
+fi
+
+# Track tag for cleanup on failure
+_CREATED_TAG=""
+_cleanup_on_failure() {
+  if [[ -n "$_CREATED_TAG" ]] && git rev-parse --is-inside-work-tree &>/dev/null; then
+    git tag -d "$_CREATED_TAG" &>/dev/null || true
+  fi
+}
+trap '_cleanup_on_failure' EXIT
+
 BASELINE_REF=""
 if [[ "$SCOPE" == "cumulative" ]]; then
   if git rev-parse --is-inside-work-tree &>/dev/null; then
-    TIMESTAMP="$(date +%s)-${RANDOM}"
+    TIMESTAMP="$(date +%s 2>/dev/null || echo "0")-${RANDOM}"
     BASELINE_REF="angry-ralph-baseline-${TIMESTAMP}"
     git tag "$BASELINE_REF" HEAD
+    _CREATED_TAG="$BASELINE_REF"
   else
     echo "⚠️  Not a git repo — falling back to --scope=latest" >&2
     SCOPE="latest"
@@ -177,6 +191,8 @@ To monitor: grep '^iteration:' .claude/angry-ralph.local.md
 
 🔥
 EOF
+
+trap - EXIT
 
 echo ""
 echo "$PROMPT"
