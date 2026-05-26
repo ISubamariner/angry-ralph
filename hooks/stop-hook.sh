@@ -31,7 +31,7 @@ fi
 
 cleanup() {
   if [[ -n "${BASELINE_REF:-}" ]] && git rev-parse --is-inside-work-tree &>/dev/null; then
-    git rev-parse --verify "refs/tags/$BASELINE_REF" &>/dev/null && git tag -d "$BASELINE_REF" &>/dev/null || true
+    git rev-parse --verify "refs/tags/$BASELINE_REF" &>/dev/null && git tag -d -- "$BASELINE_REF" &>/dev/null || true
   fi
   rm -f "$RALPH_STATE_FILE"
 }
