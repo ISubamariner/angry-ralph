@@ -1,0 +1,12 @@
+# Angry Ralph state files (created per-session in project dirs)
+.claude/angry-ralph.local.md
+
+# OS junk
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Editor
+*.swp
+*.swo
+*~

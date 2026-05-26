@@ -1,0 +1,8 @@
+{
+  "name": "angry-ralph",
+  "version": "1.0.0",
+  "description": "Angry code reviewer in a Ralph-style iteration loop. Reviews code brutally, fixes issues, repeats until clean.",
+  "author": {
+    "name": "Ian"
+  }
+}
