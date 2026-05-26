@@ -69,6 +69,10 @@ format_duration() {
   fi
   end_epoch=$(date +%s)
   local elapsed=$((end_epoch - start_epoch))
+  if [[ $elapsed -lt 0 ]]; then
+    echo ""
+    return
+  fi
   if [[ $elapsed -lt 60 ]]; then
     echo "${elapsed}s"
   elif [[ $elapsed -lt 3600 ]]; then
