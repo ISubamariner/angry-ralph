@@ -21,6 +21,7 @@ MODE="${MODE:-token-saving}"
 if [[ "$MODE" != "token-saving" ]] && [[ "$MODE" != "opus" ]]; then
   MODE="token-saving"
 fi
+STARTED_AT=$(echo "$FRONTMATTER" | grep '^started_at:' | sed 's/started_at: *//' || true)
 
 if [[ "$MODE" == "opus" ]]; then
   AGENT_MODEL="opus"
@@ -33,6 +34,48 @@ cleanup() {
     git tag -d "$BASELINE_REF" &>/dev/null || true
   fi
   rm -f "$RALPH_STATE_FILE"
+}
+
+parse_findings_tally() {
+  local text="$1"
+  local critical=0 important=0 nitpick=0
+  local section=""
+  while IFS= read -r line; do
+    case "$line" in
+      "## CRITICAL"*) section="critical" ;;
+      "## IMPORTANT"*) section="important" ;;
+      "## NITPICK"*) section="nitpick" ;;
+      [0-9]*". "*)
+        case "$section" in
+          critical) critical=$((critical + 1)) ;;
+          important) important=$((important + 1)) ;;
+          nitpick) nitpick=$((nitpick + 1)) ;;
+        esac
+        ;;
+    esac
+  done <<< "$text"
+  echo "${critical},${important},${nitpick}"
+}
+
+format_duration() {
+  local start_iso="$1"
+  start_iso="${start_iso%\"}"
+  start_iso="${start_iso#\"}"
+  local start_epoch end_epoch
+  start_epoch=$(date -d "$start_iso" +%s 2>/dev/null || date -j -f "%Y-%m-%dT%H:%M:%SZ" "$start_iso" +%s 2>/dev/null || echo "")
+  if [[ -z "$start_epoch" ]]; then
+    echo ""
+    return
+  fi
+  end_epoch=$(date +%s)
+  local elapsed=$((end_epoch - start_epoch))
+  if [[ $elapsed -lt 60 ]]; then
+    echo "${elapsed}s"
+  elif [[ $elapsed -lt 3600 ]]; then
+    echo "$((elapsed / 60))m $((elapsed % 60))s"
+  else
+    echo "$((elapsed / 3600))h $((elapsed % 3600 / 60))m"
+  fi
 }
 
 # Session isolation
@@ -69,7 +112,15 @@ fi
 
 # Check max iterations
 if [[ $MAX_ITERATIONS -gt 0 ]] && [[ $ITERATION -ge $MAX_ITERATIONS ]]; then
-  echo "🛑 Angry Ralph: Max iterations ($MAX_ITERATIONS) reached."
+  DURATION=$(format_duration "${STARTED_AT:-}")
+  echo "" >&2
+  echo "── angry-ralph complete ──" >&2
+  echo "  Iterations: $ITERATION" >&2
+  if [[ -n "$DURATION" ]]; then
+    echo "  Duration: $DURATION" >&2
+  fi
+  echo "  Result: MAX ITERATIONS REACHED ($MAX_ITERATIONS)" >&2
+  echo "" >&2
   cleanup
   exit 0
 fi
@@ -97,6 +148,14 @@ fi
 HAS_CLEAN=$(echo "$LAST_OUTPUT" | grep -c '<review-result>CLEAN</review-result>' || true)
 HAS_SPOTLESS=$(echo "$LAST_OUTPUT" | grep -c '<review-result>SPOTLESS</review-result>' || true)
 
+if (( ITERATION % 2 == 0 )); then
+  TALLY=$(parse_findings_tally "$LAST_OUTPUT")
+  IFS=',' read -r T_CRIT T_IMP T_NIT <<< "$TALLY"
+  if [[ $((T_CRIT + T_IMP + T_NIT)) -gt 0 ]] || [[ $HAS_CLEAN -gt 0 ]] || [[ $HAS_SPOTLESS -gt 0 ]]; then
+    echo "Found: ${T_CRIT} CRITICAL, ${T_IMP} IMPORTANT, ${T_NIT} NITPICK" >&2
+  fi
+fi
+
 SHOULD_STOP=false
 case "$STOP_WHEN" in
   clean)
@@ -114,7 +173,17 @@ case "$STOP_WHEN" in
 esac
 
 if [[ "$SHOULD_STOP" == "true" ]]; then
-  echo "✅ Angry Ralph: Review passed ($STOP_WHEN) at iteration $ITERATION."
+  DURATION=$(format_duration "${STARTED_AT:-}")
+  TALLY=$(parse_findings_tally "$LAST_OUTPUT")
+  IFS=',' read -r T_CRIT T_IMP T_NIT <<< "$TALLY"
+  echo "" >&2
+  echo "── angry-ralph complete ──" >&2
+  echo "  Iterations: $ITERATION" >&2
+  if [[ -n "$DURATION" ]]; then
+    echo "  Duration: $DURATION" >&2
+  fi
+  echo "  Result: $(echo "$STOP_WHEN" | tr '[:lower:]' '[:upper:]') (${T_CRIT} critical, ${T_IMP} important, ${T_NIT} nitpick)" >&2
+  echo "" >&2
   cleanup
   exit 0
 fi
@@ -211,6 +280,25 @@ mv "$TEMP_FILE" "$RALPH_STATE_FILE" || exit 1
 trap - EXIT INT TERM
 
 SYSTEM_MSG="🔥 Angry Ralph iteration $NEXT_ITERATION ($(if (( NEXT_ITERATION % 2 == 0 )); then echo 'REVIEW pass'; else echo 'WORK pass'; fi)) | stop-when: $STOP_WHEN | mode: $MODE (agent model: $AGENT_MODEL)"
+
+# Progress banner
+FILE_COUNT=""
+if git rev-parse --is-inside-work-tree &>/dev/null; then
+  if [[ "$SCOPE" == "cumulative" ]] && [[ -n "$BASELINE_REF" ]]; then
+    FILE_COUNT=$(git diff --stat "$BASELINE_REF" 2>/dev/null | tail -1 | grep -oE '[0-9]+ file' | grep -oE '[0-9]+' || echo "")
+  else
+    FILE_COUNT=$(git diff --stat HEAD~1 2>/dev/null | tail -1 | grep -oE '[0-9]+ file' | grep -oE '[0-9]+' || echo "")
+  fi
+fi
+
+PASS_TYPE=$(if (( NEXT_ITERATION % 2 == 0 )); then echo "review"; else echo "work"; fi)
+BANNER="── angry-ralph ── iteration ${NEXT_ITERATION} (${PASS_TYPE})"
+if [[ -n "$FILE_COUNT" ]]; then
+  BANNER="${BANNER} ── ${FILE_COUNT} files changed"
+fi
+BANNER="${BANNER} ── stop-when: ${STOP_WHEN} ──"
+
+echo "$BANNER" >&2
 
 jq -n \
   --arg prompt "$NEXT_PROMPT" \
