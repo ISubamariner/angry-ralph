@@ -125,7 +125,7 @@ if [[ -z "$PROMPT" ]]; then
   exit 1
 fi
 
-if echo "$PROMPT" | grep -qE '^\-\-\-[[:space:]]*$'; then
+if echo "$PROMPT" | grep -qx '\-\-\-'; then
   echo "❌ Error: Prompt cannot contain a line that is exactly '---' (conflicts with state file format)" >&2
   exit 1
 fi
