@@ -45,11 +45,16 @@ parse_findings_tally() {
       "## CRITICAL"*) section="critical" ;;
       "## IMPORTANT"*) section="important" ;;
       "## NITPICK"*) section="nitpick" ;;
-      [0-9]*". "*)
-        case "$section" in
-          critical) critical=$((critical + 1)) ;;
-          important) important=$((important + 1)) ;;
-          nitpick) nitpick=$((nitpick + 1)) ;;
+      *)
+        local trimmed="${line#"${line%%[![:space:]]*}"}"
+        case "$trimmed" in
+          [0-9]*". "*)
+            case "$section" in
+              critical) critical=$((critical + 1)) ;;
+              important) important=$((important + 1)) ;;
+              nitpick) nitpick=$((nitpick + 1)) ;;
+            esac
+            ;;
         esac
         ;;
     esac
@@ -88,6 +93,9 @@ STATE_SESSION=$(echo "$FRONTMATTER" | grep '^session_id:' | sed 's/session_id: *
 HOOK_SESSION=$(echo "$HOOK_INPUT" | jq -r '.session_id // ""')
 if [[ -n "$STATE_SESSION" ]] && [[ "$STATE_SESSION" != "$HOOK_SESSION" ]]; then
   exit 0
+fi
+if [[ -z "$STATE_SESSION" ]] && [[ -n "$HOOK_SESSION" ]]; then
+  echo "⚠️  Angry Ralph: State file has no session_id — loop may be shared across sessions" >&2
 fi
 
 # Validate iteration
@@ -161,6 +169,7 @@ HAS_SPOTLESS=$(echo "$LAST_OUTPUT" | grep -c '<review-result>SPOTLESS</review-re
 if (( ITERATION % 2 == 0 )); then
   TALLY=$(parse_findings_tally "$LAST_OUTPUT")
   IFS=',' read -r T_CRIT T_IMP T_NIT <<< "$TALLY"
+  T_CRIT="${T_CRIT:-0}"; T_IMP="${T_IMP:-0}"; T_NIT="${T_NIT:-0}"
   if [[ $((T_CRIT + T_IMP + T_NIT)) -gt 0 ]] || [[ $HAS_CLEAN -gt 0 ]] || [[ $HAS_SPOTLESS -gt 0 ]]; then
     echo "Found: ${T_CRIT} CRITICAL, ${T_IMP} IMPORTANT, ${T_NIT} NITPICK" >&2
   fi
@@ -186,6 +195,7 @@ if [[ "$SHOULD_STOP" == "true" ]]; then
   DURATION=$(format_duration "${STARTED_AT:-}")
   TALLY=$(parse_findings_tally "$LAST_OUTPUT")
   IFS=',' read -r T_CRIT T_IMP T_NIT <<< "$TALLY"
+  T_CRIT="${T_CRIT:-0}"; T_IMP="${T_IMP:-0}"; T_NIT="${T_NIT:-0}"
   echo "" >&2
   echo "── angry-ralph complete ──" >&2
   echo "  Iterations: $ITERATION" >&2
@@ -205,7 +215,7 @@ NEXT_ITERATION=$((ITERATION + 1))
 DIFF_CMD=""
 if [[ "$SCOPE" == "cumulative" ]] && [[ -n "$BASELINE_REF" ]]; then
   if [[ "$BASELINE_REF" =~ ^angry-ralph-baseline-[0-9]+-[0-9]+-[0-9]+$ ]]; then
-    DIFF_CMD="Run: git diff \"$BASELINE_REF\""
+    DIFF_CMD="Run: git diff -- \"$BASELINE_REF\""
   else
     DIFF_CMD="Review the files you modified in your last pass"
   fi
@@ -261,6 +271,9 @@ After the agent returns its report, relay the findings to the conversation. Then
 else
   # Last was review pass (even) → next is work/fix pass
   ORIGINAL_PROMPT=$(tr -d '\r' < "$RALPH_STATE_FILE" | awk '/^---$/{i++; next} i>=2')
+  if [[ -z "$ORIGINAL_PROMPT" ]]; then
+    ORIGINAL_PROMPT="(original prompt unavailable — state file may be truncated)"
+  fi
 
   WORK_AGENT_PROMPT="Fix ALL CRITICAL and IMPORTANT issues from the review above. Then continue working on the original task:
 
@@ -283,7 +296,10 @@ After the agent completes, summarize what was fixed and any remaining work."
 fi
 
 # Update iteration (.claude/ dir guaranteed to exist — setup script creates it before state file)
-TEMP_FILE=$(mktemp "${RALPH_STATE_FILE}.XXXXXX")
+TEMP_FILE=$(mktemp "${RALPH_STATE_FILE}.XXXXXX") || {
+  echo "⚠️  Angry Ralph: mktemp failed, cannot update iteration" >&2
+  exit 0
+}
 trap 'rm -f "$TEMP_FILE"' EXIT INT TERM
 sed "s/^iteration: .*/iteration: $NEXT_ITERATION/" "$RALPH_STATE_FILE" > "$TEMP_FILE"
 mv "$TEMP_FILE" "$RALPH_STATE_FILE" || exit 1
@@ -295,7 +311,7 @@ SYSTEM_MSG="🔥 Angry Ralph iteration $NEXT_ITERATION ($(if (( NEXT_ITERATION %
 FILE_COUNT=""
 if git rev-parse --is-inside-work-tree &>/dev/null; then
   if [[ "$SCOPE" == "cumulative" ]] && [[ -n "$BASELINE_REF" ]]; then
-    FILE_COUNT=$(git diff --stat "$BASELINE_REF" 2>/dev/null | tail -1 | grep -oE '[0-9]+ files?' | grep -oE '[0-9]+' || echo "")
+    FILE_COUNT=$(git diff --stat -- "$BASELINE_REF" 2>/dev/null | tail -1 | grep -oE '[0-9]+ files?' | grep -oE '[0-9]+' || echo "")
   else
     FILE_COUNT=$(git diff --stat HEAD~1 2>/dev/null | tail -1 | grep -oE '[0-9]+ files?' | grep -oE '[0-9]+' || echo "")
   fi
