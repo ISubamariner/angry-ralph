@@ -2,7 +2,7 @@
 set -euo pipefail
 
 PROMPT_PARTS=()
-MAX_ITERATIONS=0
+MAX_ITERATIONS=6
 STOP_WHEN="clean"
 SCOPE="cumulative"
 MODE="token-saving"
@@ -20,7 +20,7 @@ ARGUMENTS:
   PROMPT...    Task description (can be multiple words without quotes)
 
 OPTIONS:
-  --max-iterations <n>    Max iterations before auto-stop (default: unlimited)
+  --max-iterations <n>    Max iterations before auto-stop (default: 6, 0=unlimited)
   --stop-when <level>     clean|spotless|manual (default: clean)
   --scope <scope>         cumulative|latest (default: cumulative)
   --mode <mode>           token-saving|opus (default: token-saving)
@@ -55,9 +55,8 @@ HELP_EOF
       exit 0
       ;;
     --max-iterations)
-      # 0 = unlimited (set when --max-iterations is omitted); explicit 0 is rejected
-      if [[ -z "${2:-}" ]] || ! [[ "$2" =~ ^[1-9][0-9]*$ ]]; then
-        echo "❌ Error: --max-iterations requires a positive integer" >&2
+      if [[ -z "${2:-}" ]] || ! [[ "$2" =~ ^[0-9]+$ ]]; then
+        echo "❌ Error: --max-iterations requires a non-negative integer (0=unlimited)" >&2
         exit 1
       fi
       MAX_ITERATIONS="$2"
@@ -140,14 +139,19 @@ _cleanup_on_failure() {
   if [[ -n "$_CREATED_TAG" ]] && git rev-parse --is-inside-work-tree &>/dev/null; then
     git tag -d "$_CREATED_TAG" &>/dev/null || true
   fi
+  rm -f .claude/angry-ralph.local.md
 }
 trap '_cleanup_on_failure' EXIT
 
 BASELINE_REF=""
 if [[ "$SCOPE" == "cumulative" ]]; then
   if git rev-parse --is-inside-work-tree &>/dev/null; then
-    _TS=$(date +%s%N 2>/dev/null)
-    [[ "$_TS" =~ ^[0-9]+$ ]] || _TS=$(date +%s 2>/dev/null || echo "0")
+    _TS=$(date +%s%N 2>/dev/null || echo "")
+    if [[ -z "$_TS" ]] || [[ ! "$_TS" =~ ^[0-9]+$ ]]; then _TS=$(date +%s 2>/dev/null || echo "0"); fi
+    if [[ -z "$_TS" ]] || [[ "$_TS" == "0" ]]; then
+      echo "❌ Error: Failed to generate timestamp for baseline tag" >&2
+      exit 1
+    fi
     TIMESTAMP="${_TS}-$$-${RANDOM}"
     BASELINE_REF="angry-ralph-baseline-${TIMESTAMP}"
     git tag "$BASELINE_REF" HEAD

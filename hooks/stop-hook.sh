@@ -16,6 +16,10 @@ MAX_ITERATIONS=$(echo "$FRONTMATTER" | grep '^max_iterations:' | sed 's/max_iter
 STOP_WHEN=$(echo "$FRONTMATTER" | grep '^stop_when:' | sed 's/stop_when: *//' || true)
 SCOPE=$(echo "$FRONTMATTER" | grep '^scope:' | sed 's/scope: *//' || true)
 BASELINE_REF=$(echo "$FRONTMATTER" | grep '^baseline_ref:' | sed 's/baseline_ref: *//' || true)
+# Validate BASELINE_REF format early (before cleanup() can use it)
+if [[ -n "$BASELINE_REF" ]] && [[ ! "$BASELINE_REF" =~ ^angry-ralph-baseline-[0-9]+-[0-9]+-[0-9]+$ ]]; then
+  BASELINE_REF=""
+fi
 MODE=$(echo "$FRONTMATTER" | grep '^mode:' | sed 's/mode: *//' || true)
 MODE="${MODE:-token-saving}"
 if [[ "$MODE" != "token-saving" ]] && [[ "$MODE" != "opus" ]]; then
@@ -69,6 +73,10 @@ format_duration() {
   local start_epoch end_epoch
   start_epoch=$(date -d "$start_iso" +%s 2>/dev/null || date -j -f "%Y-%m-%dT%H:%M:%SZ" "$start_iso" +%s 2>/dev/null || echo "")
   if [[ -z "$start_epoch" ]]; then
+    echo ""
+    return
+  fi
+  if [[ ! "$start_epoch" =~ ^[0-9]+$ ]]; then
     echo ""
     return
   fi
@@ -146,6 +154,12 @@ if [[ -z "$TRANSCRIPT_PATH" ]] || [[ "$TRANSCRIPT_PATH" == "null" ]] || [[ ! -f 
   exit 0
 fi
 
+TRANSCRIPT_SIZE=$(stat -c%s "$TRANSCRIPT_PATH" 2>/dev/null || stat -f%z "$TRANSCRIPT_PATH" 2>/dev/null || echo "0")
+if [[ "$TRANSCRIPT_SIZE" -gt 10000000 ]]; then
+  echo "⚠️  Angry Ralph: Transcript too large (${TRANSCRIPT_SIZE} bytes), skipping" >&2
+  exit 0
+fi
+
 set +e
 LAST_OUTPUT=$(jq -rs '[.[] | select(.role == "assistant") | .message.content[]? | select(.type == "text") | .text] | last // ""' "$TRANSCRIPT_PATH" 2>/dev/null)
 JQ_EXIT=$?
@@ -159,6 +173,11 @@ fi
 
 if [[ -z "$LAST_OUTPUT" ]]; then
   echo "⚠️  Angry Ralph: Empty transcript output, will retry next hook" >&2
+  exit 0
+fi
+
+if [[ "$LAST_OUTPUT" == "null" ]]; then
+  echo "⚠️  Angry Ralph: No assistant output in transcript" >&2
   exit 0
 fi
 
@@ -215,7 +234,7 @@ NEXT_ITERATION=$((ITERATION + 1))
 DIFF_CMD=""
 if [[ "$SCOPE" == "cumulative" ]] && [[ -n "$BASELINE_REF" ]]; then
   if [[ "$BASELINE_REF" =~ ^angry-ralph-baseline-[0-9]+-[0-9]+-[0-9]+$ ]]; then
-    DIFF_CMD="Run: git diff -- \"$BASELINE_REF\""
+    DIFF_CMD="Run: git diff \"$BASELINE_REF\""
   else
     DIFF_CMD="Review the files you modified in your last pass"
   fi
@@ -241,11 +260,7 @@ case "$STOP_WHEN" in
     ;;
 esac
 
-REVIEW_AGENT_PROMPT="$DIFF_CMD to see all changes, then review them.
-
-Check for: nil pointer/null reference crashes, data leaks (passwords, tokens, PII in responses or logs), missing input validation at system boundaries, error handling gaps, XSS/SQL injection/command injection/OWASP top 10, wrong HTTP status codes, race conditions and concurrency bugs, missing or inadequate test coverage, inconsistency with existing codebase patterns, resource leaks (unclosed connections, file handles, goroutines), hardcoded secrets or configuration.
-
-Categorize each finding as CRITICAL, IMPORTANT, or NITPICK using the standard format.
+REVIEW_AGENT_PROMPT="$DIFF_CMD to see all changes, then review them using your standard checklist and output format.
 
 If there are ${REVIEW_THRESHOLD}, output <review-result>${RESULT_TAG}</review-result>.
 ONLY output that tag if the statement is genuinely true. Do NOT lie to exit the loop."
@@ -267,7 +282,7 @@ Review instructions to pass as the agent prompt:
 ${REVIEW_AGENT_PROMPT}
 ---
 
-After the agent returns its report, relay the findings to the conversation. Then, if the agent found ${REVIEW_THRESHOLD}, output <review-result>${RESULT_TAG}</review-result>. ONLY output that tag if the agent's review genuinely supports it."
+After the agent returns, summarize: count of findings per severity and list only CRITICAL items (if any). Do NOT echo the full report — the subagent already produced it. Then, if the agent found ${REVIEW_THRESHOLD}, output <review-result>${RESULT_TAG}</review-result>. ONLY output that tag if the agent's review genuinely supports it."
 else
   # Last was review pass (even) → next is work/fix pass
   ORIGINAL_PROMPT=$(tr -d '\r' < "$RALPH_STATE_FILE" | awk '/^---$/{i++; next} i>=2')
@@ -275,9 +290,13 @@ else
     ORIGINAL_PROMPT="(original prompt unavailable — state file may be truncated)"
   fi
 
-  WORK_AGENT_PROMPT="Fix ALL CRITICAL and IMPORTANT issues from the review above. Then continue working on the original task:
+  if [[ $NEXT_ITERATION -le 3 ]]; then
+    WORK_AGENT_PROMPT="Fix ALL CRITICAL and IMPORTANT issues from the review above. Then continue working on the original task:
 
 ${ORIGINAL_PROMPT}"
+  else
+    WORK_AGENT_PROMPT="Fix ALL CRITICAL and IMPORTANT issues from the review above. Continue working on the original task (already described in earlier iterations)."
+  fi
 
   NEXT_PROMPT="Dispatch a general-purpose agent to fix the issues found in the review and continue working on the task.
 
@@ -311,9 +330,9 @@ SYSTEM_MSG="🔥 Angry Ralph iteration $NEXT_ITERATION ($(if (( NEXT_ITERATION %
 FILE_COUNT=""
 if git rev-parse --is-inside-work-tree &>/dev/null; then
   if [[ "$SCOPE" == "cumulative" ]] && [[ -n "$BASELINE_REF" ]]; then
-    FILE_COUNT=$(git diff --stat -- "$BASELINE_REF" 2>/dev/null | tail -1 | grep -oE '[0-9]+ files?' | grep -oE '[0-9]+' || echo "")
+    FILE_COUNT=$(git diff --stat "$BASELINE_REF" 2>/dev/null | tail -1 | awk '{print $1}' || echo "")
   else
-    FILE_COUNT=$(git diff --stat HEAD~1 2>/dev/null | tail -1 | grep -oE '[0-9]+ files?' | grep -oE '[0-9]+' || echo "")
+    FILE_COUNT=$(git diff --stat HEAD~1 2>/dev/null | tail -1 | awk '{print $1}' || echo "")
   fi
 fi
 
